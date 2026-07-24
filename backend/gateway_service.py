@@ -5,10 +5,13 @@ import psycopg2
 from psycopg2 import Error
 import paho.mqtt.client as mqtt
 
+from ai_service import analyze_vitals, load_model
+
 # --- KONFIGURASI ---
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
-MQTT_TOPIC = "healthcare/patient/vitals"
+MQTT_TOPIC_INPUT = "healthcare/patient/vitals"
+MQTT_TOPIC_OUTPUT = "healthcare/patient/monitor_ews"
 
 DB_CONFIG = {
     "host": "localhost",
@@ -20,9 +23,9 @@ DB_CONFIG = {
 
 # --- FUNGSI DATABASE ---
 def save_to_db(data):
+    connection = None
     try:
         connection = psycopg2.connect(**DB_CONFIG)
-        # Di PostgreSQL, kita cek menggunakan "not connection.closed"
         if not connection.closed:
             cursor = connection.cursor()
             query = """
@@ -51,7 +54,7 @@ def save_to_db(data):
     except Error as e:
         print(f"[DB ERROR] Gagal menyimpan data: {e}")
     finally:
-        if "connection" in locals() and not connection.closed:
+        if connection and not connection.closed:
             cursor.close()
             connection.close()
 
@@ -60,8 +63,9 @@ def save_to_db(data):
 def on_connect(client, userdata, flags, reason_code, properties=None):
     if reason_code == 0:
         print(f"[MQTT] Terhubung ke Broker {MQTT_BROKER}!")
-        client.subscribe(MQTT_TOPIC)
-        print(f"[MQTT] Mendengarkan topik: {MQTT_TOPIC}")
+        # PERBAIKAN 1: Menggunakan MQTT_TOPIC_INPUT (sebelumnya error karena MQTT_TOPIC tidak terdefinisi)
+        client.subscribe(MQTT_TOPIC_INPUT)
+        print(f"[MQTT] Mendengarkan topik: {MQTT_TOPIC_INPUT}")
     else:
         print(f"[MQTT] Gagal terhubung, kode error: {reason_code}")
 
@@ -81,6 +85,25 @@ def on_message(client, userdata, msg):
             print("[VALIDASI GAGAL] JSON tidak memiliki struktur field wajib!")
             return
 
+        # ---> PERBAIKAN 2: EKSEKUSI ANALISIS AI REAL-TIME <---
+        # Memanggil fungsi AI yang sudah di-import untuk menganalisis 3 parameter vital
+        hasil_ai = analyze_vitals(
+            int(data["bpm"]), int(data["spo2"]), float(data["suhu"])
+        )
+        # Sisipkan hasil AI ke dalam JSON untuk dikirim ke frontend
+        data["ai_analysis"] = hasil_ai
+
+        print("-" * 50)
+        print(f"[HASIL ANALISIS AI] Pasien: {data['id_pasien']}")
+        print(f"Status EWS : {hasil_ai['status_label']}")
+        print(f"Tindakan   : {hasil_ai['rekomendasi']}")
+        print("-" * 50)
+
+        # ---> PERBAIKAN 3: FORWARD HASIL AI KE TOPIK OUTPUT <---
+        # Publish payload yang sudah dilengkapi AI ke topik monitor_ews agar bisa dibaca Vercel / Dashboard
+        client.publish(MQTT_TOPIC_OUTPUT, json.dumps(data))
+        print(f"[MQTT TERKIRIM] Data EWS dipublish ke: {MQTT_TOPIC_OUTPUT}")
+
         # 3. Simpan ke Database
         save_to_db(data)
 
@@ -92,11 +115,15 @@ def on_message(client, userdata, msg):
 
 # --- JALANKAN SERVICE ---
 if __name__ == "__main__":
+    print("[SYSTEM] Memulai Gateway Service...")
+    
+    # PERBAIKAN 4: Muat model AI ke memori sebelum broker MQTT berjalan
+    load_model()
+
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
 
-    print("[SYSTEM] Memulai Gateway Service...")
     try:
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         client.loop_forever()
