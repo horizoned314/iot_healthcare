@@ -1,19 +1,29 @@
+import os
 import json
 import random
 import time
 from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
+from dotenv import load_dotenv
 
-MQTT_BROKER = "localhost"
-MQTT_TOPIC = "healthcare/patient/vitals"
+# Memuat variabel lingkungan dari file .env
+load_dotenv()
+
+# --- KONFIGURASI DARI .ENV ---
+MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
+MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
+# Sensor tiruan mengirim data sebagai input, jadi kita gunakan MQTT_TOPIC_INPUT
+MQTT_TOPIC = os.getenv("MQTT_TOPIC_INPUT", "healthcare/patient/vitals")
 
 
 def run_mock_sensor():
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    client.connect(MQTT_BROKER, 1883, 60)
-
-    print("[MOCK SENSOR] Memulai pengiriman data sensor tiruan...")
+    
     try:
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+        print(f"[MOCK SENSOR] Terhubung ke Broker {MQTT_BROKER}:{MQTT_PORT}")
+        print(f"[MOCK SENSOR] Memulai pengiriman data ke topik: {MQTT_TOPIC} ...\n")
+        
         while True:
             # Generate data tanda-tanda vital yang realistis
             payload = {
@@ -34,9 +44,12 @@ def run_mock_sensor():
             time.sleep(2)  # Kirim data setiap 2 detik
 
     except KeyboardInterrupt:
-        print("\n[MOCK SENSOR] Simulasi dihentikan.")
+        print("\n[MOCK SENSOR] Simulasi dihentikan oleh pengguna.")
+    except Exception as e:
+        print(f"\n[ERROR] Gagal menjalankan sensor tiruan: {e}")
     finally:
         client.disconnect()
+        print("[MOCK SENSOR] Terputus dari broker.")
 
 
 if __name__ == "__main__":

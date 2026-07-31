@@ -1,3 +1,4 @@
+import os
 from typing import List
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,9 +6,13 @@ import psycopg2
 from psycopg2 import Error
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Memuat variabel lingkungan dari file .env
+load_dotenv()
 
 app = FastAPI(
-    title="IoT Medis API", description="API untuk Dashboard Monitoring"
+    title="IoT Healthcare API", description="API untuk Dashboard Monitoring"
 )
 
 app.add_middleware(
@@ -18,12 +23,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_CONFIG = {
-    "host": "localhost",
-    "user": "root",
-    "password": "jakartaku01",
-    "dbname": "db_iot_medis",
-}
+# --- KONFIGURASI DARI .ENV ---
+# Membaca Connection String Neon dari .env
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Validasi jika DATABASE_URL tidak ditemukan di .env
+if not DATABASE_URL:
+    raise ValueError("[ERROR] DATABASE_URL tidak ditemukan di file .env!")
 
 
 class VitalRecord(BaseModel):
@@ -41,7 +47,9 @@ def get_patient_history(
     id_pasien: str, limit: int = Query(50, ge=1, le=500)
 ):
     try:
-        connection = psycopg2.connect(**DB_CONFIG)
+        # Menggunakan DATABASE_URL untuk koneksi ke Neon
+        connection = psycopg2.connect(DATABASE_URL)
+        
         # Gunakan RealDictCursor agar hasil query dari Postgres langsung berbentuk Dictionary/JSON
         cursor = connection.cursor(cursor_factory=RealDictCursor)
 
